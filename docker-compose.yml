@@ -1,0 +1,50 @@
+services:
+  node-app:
+    build: .
+    ports:
+      - "3000:3000"
+      - "9464:9464"
+    depends_on:
+      - otel-collector
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+
+  tempo:
+    image: grafana/tempo:2.8.1
+    command: ["--config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./tempo.yaml:/etc/tempo.yaml
+      - tempo-data:/tmp/tempo
+    ports:
+      - "4317:4317"
+      - "3200:3200"
+
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana-storage:/var/lib/grafana
+
+  otel-collector:
+    image: otel/opentelemetry-collector:latest
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otelcol/config.yaml
+    ports:
+      - "4318:4318"
+      - "8889:8889"  # Expose Prometheus exporter port
+
+    depends_on:
+      - tempo
+
+volumes:
+  grafana-storage:
+  tempo-data:
