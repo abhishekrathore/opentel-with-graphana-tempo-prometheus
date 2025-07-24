@@ -70,22 +70,94 @@ docker-compose up --build
 | Prometheus  | [http://localhost:9090](http://localhost:9090)                     | 9090 | Metrics explorer               |
 
 ---
+Here's the complete architecture diagram showing how all the services connect! 
+
+## Key Connection Details:
+
+### Trace Flow (🔍)
+1. **Node.js App** generates traces via OpenTelemetry SDK
+2. **OTEL Collector** receives traces on port `4318` (HTTP) from `node-app`
+3. **Tempo** receives traces from collector via gRPC on port `4317`
+4. **Grafana** queries traces from Tempo on port `3200`
+
+### Metrics Flow (📊)
+1. **Node.js App** exposes Prometheus metrics on port `9464`
+2. **OTEL Collector** exposes its own metrics on port `8889`
+3. **Prometheus** scrapes both endpoints every 5 seconds
+4. **Grafana** queries metrics from Prometheus on port `9090`
+
+### Port Mapping Summary:
+```
+External → Internal
+3000 → node-app:3000     (Express API)
+3001 → grafana:3000      (Grafana UI)
+9090 → prometheus:9090   (Prometheus UI)
+4318 → otel-collector:4318 (OTLP HTTP)
+3200 → tempo:3200        (Tempo HTTP API)
+```
+
+The beauty of this setup is that traces and metrics flow through separate pipelines but converge in Grafana for unified observability! You can correlate traces with metrics to get complete insights into your application's performance.
 
 ## 🔀 Data Flow: Trace + Metrics
 
 ```mermaid
-graph TD
-  A[Node.js App]
-  B[OTel Collector]
-  C[Tempo]
-  D[Prometheus]
-  E[Grafana]
-
-  A -->|OTLP HTTP (4318)| B
-  B -->|Traces| C
-  B -->|Metrics| D
-  C -->|Traces| E
-  D -->|Metrics| E
+graph TB
+    %% External Access
+    User[👤 User<br/>localhost:3000] --> NodeApp
+    GrafanaUI[🖥️ Grafana UI<br/>localhost:3001] --> Grafana
+    PrometheusUI[📊 Prometheus UI<br/>localhost:9090] --> Prometheus
+    
+    %% Node.js Application
+    subgraph NodeContainer["🐳 node-app Container"]
+        NodeApp[📱 Node.js App<br/>Express Server<br/>Port: 3000]
+        PrometheusEndpoint[📈 Prometheus Metrics<br/>Port: 9464]
+        NodeApp --> PrometheusEndpoint
+    end
+    
+    %% OTEL Collector
+    subgraph OTELContainer["🐳 otel-collector Container"]
+        OTELCollector[🔄 OTEL Collector<br/>Port: 4318 HTTP<br/>Port: 4317 gRPC]
+        OTELPrometheus[📊 Prometheus Exporter<br/>Port: 8889]
+        OTELCollector --> OTELPrometheus
+    end
+    
+    %% Tempo
+    subgraph TempoContainer["🐳 tempo Container"]
+        Tempo[🕰️ Tempo<br/>Trace Storage<br/>Port: 3200 HTTP<br/>Port: 4317 gRPC]
+    end
+    
+    %% Prometheus
+    subgraph PrometheusContainer["🐳 prometheus Container"]
+        Prometheus[📈 Prometheus<br/>Metrics Storage<br/>Port: 9090]
+    end
+    
+    %% Grafana
+    subgraph GrafanaContainer["🐳 grafana Container"]
+        Grafana[📊 Grafana<br/>Visualization<br/>Port: 3000]
+    end
+    
+    %% Data Flow - Traces
+    NodeApp -->|"🔍 Traces<br/>HTTP POST /v1/traces<br/>otel-collector:4318"| OTELCollector
+    OTELCollector -->|"📤 Traces<br/>gRPC<br/>tempo:4317"| Tempo
+    
+    %% Data Flow - Metrics
+    Prometheus -->|"📊 Scrape Metrics<br/>node-app:9464<br/>/metrics endpoint"| PrometheusEndpoint
+    Prometheus -->|"📊 Scrape Metrics<br/>otel-collector:8889<br/>/metrics endpoint"| OTELPrometheus
+    
+    %% Grafana Data Sources
+    Grafana -->|"🔍 Query Traces<br/>tempo:3200<br/>Tempo Data Source"| Tempo
+    Grafana -->|"📈 Query Metrics<br/>prometheus:9090<br/>Prometheus Data Source"| Prometheus
+    
+    %% Styling
+    classDef containerStyle fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    classDef appStyle fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef userStyle fill:#e8f5e8,stroke:#1b5e20,stroke-width:2px
+    classDef dataStyle fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    
+    class NodeContainer,OTELContainer,TempoContainer,PrometheusContainer,GrafanaContainer containerStyle
+    class NodeApp,OTELCollector,Tempo,Prometheus,Grafana appStyle
+    class User,GrafanaUI,PrometheusUI userStyle
+    class PrometheusEndpoint,OTELPrometheus dataStyle
 ```
 
 ---
